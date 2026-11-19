@@ -3,6 +3,7 @@
 # Extracted from report_generator.py — DO NOT add business logic here.
 # =============================================================================
 from __future__ import annotations
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from osdagbridge.core.utils.common import (
@@ -779,25 +780,21 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
     # Generate Table 5.20(c) rows
     cb_capacity_rows = []
     for pair in pairs:
-        rows_for_pair = []
-        for member, label in [("diagonal", "Diagonal"),
-                            ("chord", "Chord")]:
-            force_str, ftype = bridge.get_cb_governing_force(pair, member)
-            section  = bridge.get_cb_section(pair, member, ftype)
-            gov_lc   = bridge.get_cb_gov_lc(pair, member, ftype)
-            capacity = bridge.get_cb_capacity(pair, member, ftype)
-            ur       = bridge.get_cb_efficiency(pair, member, ftype)
-            status   = bridge.get_cb_status(pair, member, ftype)
-            rows_for_pair.append(
-                r" & " + label + r" & " + section
-                + r" & " + gov_lc + r" & " + force_str + r" & " + capacity
-                + r" & " + ur + r" & " + status + r" \\[6pt]\cline{2-8}"
-            )
-        first = r"\multirow{2}{*}{\makecell{" + _tex(pair) + r"}}" + rows_for_pair[0]
-        rest  = rows_for_pair[1:]
-        cb_capacity_rows.append(first)
-        cb_capacity_rows.extend(rest)
-        cb_capacity_rows.append(r"\hline")
+        for member, label in (("diagonal", "Diagonal"), ("chord", "Chord")):
+            for direction in ("tension", "compression"):
+                force = bridge.get_cb_force(pair, member, direction)
+                section = bridge.get_cb_section(pair, member, direction)
+                combo = bridge.get_cb_gov_lc(pair, member, direction)
+                capacity = bridge.get_cb_capacity(pair, member, direction)
+                ur = bridge.get_cb_efficiency(pair, member, direction)
+                status = bridge.get_cb_status(pair, member, direction)
+                if not any((force, section, combo, capacity, ur, status)):
+                    continue
+                cells = (_tex(pair), f"{label} ({direction})", section, combo,
+                         force, capacity, ur, status)
+                cb_capacity_rows.append(
+                    " & ".join(cell or "---" for cell in cells) + r" \\" + "\n\\hline"
+                )
     cb_capacity_content = "\n".join(cb_capacity_rows)
 
 
@@ -947,15 +944,19 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
                     ur = float(eff)
                 except (TypeError, ValueError):
                     continue
+                if not isfinite(ur):
+                    continue
                 if best is None or ur > best[0]:
                     best = (ur, pair, member, cap)
         if best is None:
             return ("---", "---", "---", "---")
         ur, pair, member, cap = best
         gov = bridge.get_cb_gov_lc(pair, member, force_type) or "---"
-        dem = f"{float(cap) * ur:.2f} kN" if cap else "---"
+        dem = _vu_522(bridge.get_cb_force(pair, member, force_type), "kN") or "---"
         cap_s = (cap + " kN") if cap else "---"
-        return (gov, dem, cap_s, _ur_522(ur))
+        status = bridge.get_cb_status(pair, member, force_type)
+        ratio = _ur_522(ur) + (f" ({status})" if status else "")
+        return (f"{_tex(pair)}, {_tex(member)}, {gov}", dem, cap_s, ratio)
 
     def _cb_slender_row():
         best = None  # (ratio, slend, limit)
@@ -1435,7 +1436,7 @@ Cross bracing between adjacent plate girders provides lateral stability during c
 \begin{longtable}{|C{2.0cm}|L{1.8cm}|C{2.2cm}|C{3.0cm}|C{1.8cm}|C{1.8cm}|C{1.2cm}|C{1.8cm}|}
 \caption{\textbf{Cross Bracing Design --- Capacity Summary}}
 \hline
-\textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Capacity (kN)} & \textbf{UR} & \textbf{Status} \\[6pt]
+\textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Member Capacity (kN)} & \textbf{Osdag Util.} & \textbf{Status} \\[6pt]
 \hline
 """ + cb_capacity_content + r"""
 \end{longtable}
@@ -1480,7 +1481,7 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 \begin{longtable}{|C{2.0cm}|L{1.8cm}|C{2.2cm}|C{3.0cm}|C{1.8cm}|C{1.8cm}|C{1.2cm}|C{1.8cm}|}
 \caption{\textbf{End Diaphragm Design --- Capacity Summary}}
 \hline
-\textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Capacity (kN)} & \textbf{UR} & \textbf{Status} \\[6pt]
+\textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Member Capacity (kN)} & \textbf{Osdag Util.} & \textbf{Status} \\[6pt]
 \hline
 """ + cb_capacity_content + r"""
 \end{longtable}
@@ -1499,7 +1500,7 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 \hline
 """ + t522_content + r"""
 \end{longtable}
-\noindent\textit{Note: UR = Demand / Capacity. All values $\leq 1.0$ indicate passing checks. The governing check for each component is highlighted in the individual design check sections above.}
+\noindent\textit{Note: UR = Demand / Capacity. Cross-bracing axial rows show member capacity and stored Osdag utilization, which may use connection capacity. The governing check for each component is highlighted in the individual design check sections above.}
 
 """
 

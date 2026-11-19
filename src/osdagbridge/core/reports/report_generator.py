@@ -587,16 +587,13 @@ class ReportDataBridge:
         return ""
 
     def get_cb_status(self, pair: str, member: str, force_type: str) -> str:
-        """PASS / FAIL based on UR <= 1.0."""
-        try:
-            val = self._cb_osdag(pair, member, force_type).get("efficiency")
-            if val is not None:
-                ur = float(val)
-                if ur <= 1.0:
-                    return r"\textcolor{black}{PASS}"
-                return r"\textcolor{red}{FAIL}"
-        except (TypeError, ValueError):
-            pass
+        """Return the stored solver verdict when available."""
+        result = self._cb_osdag(pair, member, force_type)
+        status = str(result.get("status")).strip().casefold()
+        if status in {"false", "fail", "failed"}:
+            return r"\textcolor{red}{FAIL}"
+        if status in {"true", "pass", "passed"}:
+            return r"\textcolor{black}{PASS}"
         return ""
 
     def get_cb_gov_lc(self, pair: str, member: str, force_type: str) -> str:
